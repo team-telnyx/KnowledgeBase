@@ -1,0 +1,63 @@
+name: External Contribution Check
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+
+jobs:
+  check-external-contributions:
+    runs-on: ubuntu-latest
+    if: >
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref }}
+
+      - name: Check for disallowed changes
+        run: |
+          echo "Checking external contribution for disallowed changes..."
+
+          # Get list of changed files with their status
+          CHANGES=$(git diff --name-status origin/${{ github.event.pull_request.base.ref }}..HEAD)
+
+          echo "Changes detected:"
+          echo "$CHANGES"
+
+          VIOLATIONS=""
+
+          while IFS=$'\t' read -r status file; do
+            case "$status" in
+              A)
+                VIOLATIONS="${VIOLATIONS}❌ New file not allowed: ${file}\n"
+                ;;
+              D)
+                VIOLATIONS="${VIOLATIONS}❌ File deletion not allowed: ${file}\n"
+                ;;
+              R*)
+                VIOLATIONS="${VIOLATIONS}❌ File rename/move not allowed: ${file}\n"
+                ;;
+            esac
+          done <<< "$CHANGES"
+
+          if [ -n "$VIOLATIONS" ]; then
+            echo ""
+            echo "============================================"
+            echo "EXTERNAL CONTRIBUTION POLICY VIOLATION"
+            echo "============================================"
+            echo -e "$VIOLATIONS"
+            echo ""
+            echo "External contributors may only modify existing files."
+            echo "Creating, deleting, or renaming files is not permitted."
+            echo "See CONTRIBUTING.md for details."
+            exit 1
+          fi
+
+          echo "✅ All changes are modifications to existing files. Looks good!"
